@@ -1,7 +1,7 @@
 #include "3d_rtree.h"
 
 extern int flipCount;
-char queryFileName[] = "taxi.txt";
+char queryFileName[] = "taxi_short.txt";
 int NUMDATA=100;
 int SEARCH=10;
 int IpthreadNum=8;
@@ -20,11 +20,11 @@ void cache_drop(){
 
 // thread data
 struct thread_data{
-	int  tid;
-	int  hit;
-    struct Rect* rect;
-    int startDataNum; // start number of fraction for each thread
-    int dataNum;      // number of data for each thread
+	int  tid =0;
+	int  hit=0;
+    struct Rect* rect=NULL;
+    int startDataNum=0; // start number of fraction for each thread
+    int dataNum=0;      // number of data for each thread
 };
 
 struct Node * total_root = NULL;
@@ -36,7 +36,7 @@ void* PThreadInsert(void *arg)
     struct thread_data* td = (struct thread_data*) arg;
      
     for(int i=0; i<td->dataNum; i++){
-        RTreeInsertRect(&(td->rect[i]), td->startDataNum+i+1, (&total_root), 0, (&total_log[td->tid]));
+        RTreeInsertRect(&(td->rect[i]), td->startDataNum+i+1, (&total_root), (&total_log[td->tid]));
         td->hit++; 
 	}
 
@@ -95,7 +95,7 @@ int main(int argc, char *args[])
     //################ PREPARE TO SPLIT ######################
 
     //##################### GET DATA #########################
-    FILE* fp = fopen("taxi.txt", "r+b");
+    FILE* fp = fopen("taxi_short.txt", "r+b");
 
     if(fp==0x0){
         printf("Line %d : Insert file open error\n", __LINE__);
@@ -104,7 +104,7 @@ int main(int argc, char *args[])
 
     r = new Rect[NUMDATA];
     for(int i=0; i<NUMDATA; i++){
-        fscanf(fp, "%f %f %f %f %f", &r[i].boundary[0], &r[i].boundary[1], &r[i].boundary[3], &r[i].boundary[4], &r[i].boundary[5]);
+        fscanf(fp, "%f %f %f %f %f %f", &r[i].boundary[0], &r[i].boundary[1], &r[i].boundary[2], &r[i].boundary[3], &r[i].boundary[4], &r[i].boundary[5]);
         if(r[i].boundary[0] > r[i].boundary[3]){ 
             float tmp = r[i].boundary[0]; 
             r[i].boundary[0] = r[i].boundary[3];  
@@ -122,7 +122,6 @@ int main(int argc, char *args[])
                 r[i].boundary[4] = tmp; 
             }
         }
-        r[i].boundary[2] = r[i].boundary[5];
    }
     
     if(fclose(fp) != 0) printf("Insert file close error\n");
@@ -137,7 +136,7 @@ int main(int argc, char *args[])
 
     sr = new Rect[SEARCH];
     for(int i=0; i<SEARCH; i++){
-        fscanf(fp, "%f %f %f %f %f", &sr[i].boundary[0], &sr[i].boundary[1], &sr[i].boundary[3], &sr[i].boundary[4], &sr[i].boundary[5]);
+        fscanf(fp, "%f %f %f %f %f %f", &sr[i].boundary[0], &sr[i].boundary[1], &sr[i].boundary[2], &sr[i].boundary[3], &sr[i].boundary[4], &sr[i].boundary[5]);
         if(sr[i].boundary[0] > sr[i].boundary[3]){ 
             float tmp = sr[i].boundary[0]; 
             sr[i].boundary[0] = sr[i].boundary[3];  
@@ -176,7 +175,7 @@ int main(int argc, char *args[])
     const int halfData = NUMDATA / 2;
     //warm up
     for(int i=0; i< halfData; i++){
-        RTreeInsertRect(&r[i], i+1, &total_root, 0, NULL);
+        RTreeInsertRect(&r[i], i+1, &total_root, NULL);
         ihit++;
     }
     printf("Warm up (Half of NUMDATA) end %d/%d\n", halfData, ihit);
@@ -228,7 +227,6 @@ int main(int argc, char *args[])
     printf("clflush: %d, flipCount: %d\n", clflushCnt, flipCount); 	
     fprintf(stderr, "Insertion is done.\n");
  
-    //RTreePrint(total_root); 
 	//########################################################
 //-------------------------------------------------------------------------
     //###################  SEARCH DATA #######################
@@ -273,6 +271,7 @@ int main(int argc, char *args[])
     //	printf("==========================================\n");
 	//########################################################
 #else
+    printf("[Concurrent!!]\n");
     struct timeval t1,t2;
     double time_t2;
     int rc;
@@ -283,83 +282,70 @@ int main(int argc, char *args[])
     int insertThreads = ((IpthreadNum/10)*3+temp);
     int searchThreads = (IpthreadNum - insertThreads);
 
-    pthread_t threads_i[insertThreads];
-    struct thread_data td_i[insertThreads];
-    pthread_t threads[searchThreads];
-    struct thread_data td[searchThreads];
-    gettimeofday(&t1,0); // start the stopwatch
+    pthread_t threads[IpthreadNum];
+    struct thread_data td[IpthreadNum];
     
     int in=0, se=0; 
     const int insertPerThread = (NUMDATA-halfData) / insertThreads;
     const int searchPerThread = SEARCH / searchThreads;
-    
+   
+    int useSt = IpthreadNum;
+    int useIt = IpthreadNum;
+     
+    gettimeofday(&t1,0); // start the stopwatch
     for(int i=0; i<IpthreadNum; i++){
-       
-      switch(i%10)
-      {
-        case 0:
-        case 1:
-        case 2: {
+      if(i%10 <3){
             int dataS = halfData + in*insertPerThread;
             int dataE = (in == insertThreads-1)? NUMDATA-dataS : insertPerThread;
+
             in++;
              
-            td_i[i].tid = i;
-            td_i[i].hit = 0;
-            td_i[i].rect = &r[dataS];
-            td_i[i].startDataNum = dataS;
-            td_i[i].dataNum = dataE;
-            rc = pthread_create(&threads_i[i], NULL, PThreadInsert, (void *)&td_i[i]);
-            break;
-        }
-        case 3:
-        case 4:
-        case 5:
-        case 6:
-        case 7:
-        case 8:
-        case 9: {
+            td[i].tid = i;
+            td[i].hit = 0;
+            td[i].rect = &r[dataS];
+            td[i].startDataNum = dataS;
+            td[i].dataNum = dataE;
+            rc = pthread_create(&threads[i], NULL, PThreadInsert, (void *)&td[i]);
+      }else{
             int searchS = se*searchPerThread;
             int searchE = (se== searchThreads-1)? SEARCH-searchS : searchPerThread; 
+            
             se++;
-             
+            
             td[i].tid = i;
             td[i].hit = 0;
             td[i].rect = &sr[searchS];
             td[i].dataNum = searchE;
             rc = pthread_create(&threads[i], NULL, PThreadSearch, (void *)&td[i]);
-            break;
-        }
-        default:
-            return 0;
+      }
+      if (rc) {
+            printf("ERROR; return code from pthread_create() is %d\n", rc);
+            exit(-1);
       }
     }
-    printf("%d %d\n", in, se);
+//    printf("%d %d\n", in, se);
    
-    for(int i=0; i<insertThreads; i++){
-        rc = pthread_join(threads_i[i], &status);
-        if (rc) {
-            printf("ERROR; return code from pthread_join() is %d\n", rc);
-            exit(-1);
-        }
-       ihit += td_i[i].hit;
-    }
-    for(int i=0; i<searchThreads; i++){
+    for(int i=0; i<IpthreadNum; i++){
         rc = pthread_join(threads[i], &status);
         if (rc) {
             printf("ERROR; return code from pthread_join() is %d\n", rc);
             exit(-1);
         }
-       hit += td[i].hit;
+        if(i%10 <3)
+           ihit += td[i].hit;
+        else
+           hit += td[i].hit;
     }
     
     gettimeofday(&t2,0);
     time_t2 = (t2.tv_sec-t1.tv_sec)*1000000 + (t2.tv_usec - t1.tv_usec);
     printf("concurrent time (msec): %.3lf\n", time_t2/1000);
     printf("Host Hit counter = %ld, InsertCounter: %d\n", hit, ihit);
+    printf("throughput: %.3lf\n", (time_t2/1000)/(NUMDATA+SEARCH-halfData));
 
 #endif
  
+    RTreePrint(total_root); 
     hostRTreeDestroy(total_root);    // -------------- end of host search ----
 	return 0;
 }
