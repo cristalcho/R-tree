@@ -30,14 +30,27 @@ struct Rect // Float(4byte) * 6
 struct Node;
 
 #ifndef MULTIMETA
+
+#define META 8
+#define DUMMY 24
 #define MAXCARD 55 
 #define NODECARD 55
-#define META 8
 #else
-#define MAXCARD 55 + 64*1
-#define NODECARD 55 + 64*1 
 
-#define META 8*2
+//#define META 16
+//#define DUMMY 16
+//#define MAXCARD 119
+//#define NODECARD 119 
+
+#define META 24
+#define DUMMY 8
+#define MAXCARD 183
+#define NODECARD 183 
+
+//#define META 32
+//#define DUMMY 0
+//#define MAXCARD 247
+//#define NODECARD 247
 #endif
 
 struct Branch // 24 + 8
@@ -50,7 +63,9 @@ struct Branch // 24 + 8
 struct Node
 {
     MetaData<META> meta;
-    char dummy[32 - META];
+#if DUMMY != 0
+    char dummy[DUMMY];
+#endif
     struct Branch branch[MAXCARD]; //32*55 = 1760 = 27.5 
 #ifdef SHARED
     mutable std::shared_mutex* mutex_;
