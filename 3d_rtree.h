@@ -10,6 +10,7 @@
 #include <unistd.h>
 #include <pthread.h>
 #include <queue>	// using queue C++ style
+#include <stack>	// using queue C++ style
 #include <cstring>
 #include "forPM.h"
 
@@ -67,8 +68,8 @@ void RTreePrint(struct Node* n)
 			for(int i=0; i<NODECARD; i++){
 				struct Branch b = t->branch[i];
 				
-				printf("%lf %lf %lf %lf %f %f\n", b.rect.boundary[0], b.rect.boundary[1], 
-							    b.rect.boundary[2], b.rect.boundary[3], b.rect.boundary[4], b.rect.boundary[5]); 
+		//		printf("%lf %lf %lf %lf %f %f\n", b.rect.boundary[0], b.rect.boundary[1], 
+		//					    b.rect.boundary[2], b.rect.boundary[3], b.rect.boundary[4], b.rect.boundary[5]); 
 
 				if(t->meta.Bit(i)){ 
 					nodeQueue.push(b.child);
@@ -79,13 +80,13 @@ void RTreePrint(struct Node* n)
 			printf("\n");
 		}else{	
         //printf("------ Leaf : [%p]-------\n", t);
-          t->meta.Print();
+   //       t->meta.Print();
 		  for(int i=0; i<NODECARD; i++){
-              if(t->meta.Bit(i))
-        			printf("%lf %lf %lf %lf %f %f\n", t->branch[i].rect.boundary[0], t->branch[i].rect.boundary[1],
-						    t->branch[i].rect.boundary[2], t->branch[i].rect.boundary[3], t->branch[i].rect.boundary[4], t->branch[i].rect.boundary[5]); 
+  //            if(t->meta.Bit(i))
+ //       			printf("%lf %lf %lf %lf %f %f\n", t->branch[i].rect.boundary[0], t->branch[i].rect.boundary[1],
+//						    t->branch[i].rect.boundary[2], t->branch[i].rect.boundary[3], t->branch[i].rect.boundary[4], t->branch[i].rect.boundary[5]); 
 		  }
-          printf("\n");
+    //      printf("\n");
         }
   }
 }
@@ -136,29 +137,28 @@ struct Node * RTreeNewIndex() {
 
 extern struct Node * total_root;
 struct splitLog * total_log = NULL;
+int log_len = 0;
 void log_init(int tnum){
-    total_log = new splitLog[tnum];
+    total_log = new splitLog[tnum*2];
+    log_len = tnum*2;
 }
 
 // R-tree search in CPU
 int hostRTreeSearch(struct Node *n, struct Rect *r, int& reSplit)
 {
-    if(reSplit == 0){
-        return 0;
-    }
-	int hitCount = 0;
-	int i;
+    int hitCount = 0;
+    int i;
     char version;
 
 #ifdef SHARED
     n->mutex_->lock_shared();
 #endif
-//lock-free  
-	if (!n->meta.IsLeaf()) /* this is an internal node in the tree */
-	{   
-        version = n->meta.Version(); 
+    //lock-free  
+    if (!n->meta.IsLeaf()) /* this is an internal node in the tree */
+    {   
+        version = n->meta.Version();
         std::queue<Node*> childqueue;
-		while(1){
+        while(1){
             for (i=0; i<NODECARD; i++){
                 //get all overlap branches
                 if (RTreeOverlap(r,&n->branch[i].rect) && n->meta.Bit(i))
@@ -172,38 +172,77 @@ int hostRTreeSearch(struct Node *n, struct Rect *r, int& reSplit)
                 std::swap(childqueue, newchild);
                 version = n->meta.Version();
             }else if(version != n->meta.Version() && n->meta.Version() == 0){
-                //version become 0, it means this node is splitted
-                int new_reSplit =1;
-                reSplit = 0;
-                return hostRTreeSearch(total_root, r, new_reSplit);
-            }
-            else{
-              while(!childqueue.empty()){
+                version = n->meta.Version();
+                std::queue<Node*> newchild;
+                std::swap(childqueue, newchild);
+            }else if(version == 0 && n->meta.Version() == 0){
+                //TODO: use log
+                //1, Find log
+                Node* s = NULL;
+                bool found = false;
+                for(int j = 0; j < log_len; j++){
+#ifndef FULLLOG
+                    if(total_log[j].child == n){
+                        s = total_log[j].sibling;
+                        found = true;
+                        break;
+                    }
+#else
+                    if(total_log[j].childPoint == n){
+                        s = total_log[j].siblingPoint;
+                        found = true;
+                        break;
+                    }
+#endif
+                }
+                if(found){
+                    //2, push branches
+                    for (i=0; i<NODECARD; i++){
+                        //get all overlap branches
+                        if (RTreeOverlap(r,&s->branch[i].rect) && s->meta.Bit(i))
+                        {
+                            childqueue.push(s->branch[i].child);
+                        }
+                    }
+                } else {
+                    version = n->meta.Version();
+                    std::queue<Node*> newchild;
+                    std::swap(childqueue, newchild);
+                    SJ();
+                    continue;
+                }
+                while(!childqueue.empty()){
                     int hc = hostRTreeSearch(childqueue.front(), r, reSplit);
-                    if(reSplit == 0)
-                        return hc;
                     hitCount += hc;
                     childqueue.pop();
-              }
-              break;
+                }
+                break;
+            }
+            else{
+                while(!childqueue.empty()){
+                    int hc = hostRTreeSearch(childqueue.front(), r, reSplit);
+                    hitCount += hc;
+                    childqueue.pop();
+                }
+                break;
             }
         }
-	}
-	else /* this is a leaf node */
-	{
-		for (i=0; i<NODECARD; i++){
+    }
+    else /* this is a leaf node */
+    {
+        for (i=0; i<NODECARD; i++){
             if(!n->meta.Bit(i)) continue;
-			if(RTreeOverlap(r,&n->branch[i].rect)) // && n->isValid.test(i))
-			//if(!Compare(r,&n->branch[i].rect)) // && n->isValid.test(i))
-			{
-				hitCount++;
-			}
+            //if(RTreeOverlap(r,&n->branch[i].rect)) // && n->isValid.test(i))
+            if(!Compare(r,&n->branch[i].rect)) // && n->isValid.test(i))
+            {  
+                hitCount++;
+            }
         }
-	}
+    }
 #ifdef SHARED
     n->mutex_->unlock_shared();
 #endif    
-	return hitCount;
+    return hitCount;
 }
 
 // Destroy Host(CPU) R-tree
@@ -230,6 +269,7 @@ void hostRTreeDestroy(struct Node *n)
 // The level argument specifies the number of steps up from the leaf
 // level to insert; e.g. a data rectangle goes in at level = 0.
 //
+thread_local int LogCur = 0;
 #ifndef INPLACE
 thread_local int trace = -2;
 thread_local bool OnTrace = false;
@@ -243,6 +283,8 @@ static int RTreeInsertRect2(struct Rect *r,
 	int i;
 	struct Branch b;
 	
+    //[OSH] n_ is child holder
+    struct Node *n_;
 	struct Node *n2;
     struct Node *parent = p;
     struct splitLog *log = sl;
@@ -279,6 +321,8 @@ static int RTreeInsertRect2(struct Rect *r,
         }
     }
 #endif
+    //[OSH]Store child in n_
+    n_ = n->branch[i].child;
 		if (!RTreeInsertRect2(r, dataID, n->branch[i].child, &n2, n, log)) // 0 
 		{
 			if(!unlocked){
@@ -298,16 +342,11 @@ static int RTreeInsertRect2(struct Rect *r,
          if(unlocked){
              n->mutex_->lock();
          }
-		 n->branch[i].rect = RTreeNodeCover(n->branch[i].child);
 	   	 b.child = n2;
 		 b.rect = RTreeNodeCover(n2);
 
-         n->meta.VersionIncr();
-         clflush((char*)n, META); 
 #ifdef INPLACE
-        rt = RTreeAddBranch(&b, n, new_node, p, log);
-        n->branch[i].rect = RTreeCombineRect(r, &n->branch[i].rect);
-        clflush((char*)&n->branch[i], sizeof(struct Branch));
+        rt = RTreeAddBranch(&b, n, new_node, p, log); //(4)
 #else
         //Add New node
         OnTrace = true;
@@ -347,6 +386,24 @@ static int RTreeInsertRect2(struct Rect *r,
         trace = -1;
 
 #endif
+        //if(rt == 0){
+        //    //Current Node is not split.( No deferred version++ )
+        //    n->meta.VersionIncr();
+        //    clflush((char*)n, 1); 
+        //}
+        //TODO: child->VersionIncr();
+        n_->meta.VersionIncr();
+        clflush((char*)n_, 1);
+        if(log){
+            //TODO: Previous Log Invalidation ( NOT current log )
+            memset(&log[(LogCur == 0)], 0, sizeof(splitLog));
+            clflush(&log[(LogCur == 0)], sizeof(splitLog));
+            //Move LogCur to unused log slot.
+            LogCur = (LogCur == 0); // if LogCur = 0, (LogCur == 0) = 1
+            // if LogCur = 1, (LogCur == 0) = 0
+        }
+        n->branch[i].rect = RTreeNodeCover(n->branch[i].child);
+        clflush((char*)&n->branch[i], sizeof(struct Branch));
         if(!(rt == 1 && n == p)){
             n->mutex_->unlock();
         }
@@ -356,16 +413,11 @@ static int RTreeInsertRect2(struct Rect *r,
           if(unlocked){
               pthread_mutex_lock(n->mut);
           }
-	      n->branch[i].rect = RTreeNodeCover(n->branch[i].child);
 	      b.child = n2;
 		  b.rect = RTreeNodeCover(n2);
-
-          n->meta.VersionIncr();
-          clflush((char*)n, META); 
+          
  #ifdef INPLACE
           rt = RTreeAddBranch(&b, n, new_node, p, log);
-          n->branch[i].rect = RTreeCombineRect(r, &n->branch[i].rect);
-          clflush((char*)&n->branch[i], sizeof(struct Branch));
  #else
           //Add new node
           OnTrace = true;
@@ -386,7 +438,7 @@ static int RTreeInsertRect2(struct Rect *r,
               //Split does not occur
               OnTrace = true;
               trace = i;
-              rt = RTreeAddBranch(&b, n, new_node, p, log);              if(rt == 1){
+              rt = RTreeAddBranch(&b, n, new_node, p, log); 
               if(rt == 1){
                   //Split Occur
                   if(OnTrace){
@@ -404,11 +456,29 @@ static int RTreeInsertRect2(struct Rect *r,
         trace = -1;
             //flipCount++;
 #endif
+        //if(rt == 0){
+        //    //Current Node is not split.( No deferred version++ )
+        //    n->meta.VersionIncr();
+        //    clflush((char*)n, 1); 
+        //}
+        //TODO: child->VersionIncr();
+        n_->meta.VersionIncr();
+        clflush((char*)n_, 1);
+        if(log){
+            //TODO: Previous Log Invalidation ( NOT current log )
+            memset(&log[(LogCur == 0)], 0, sizeof(splitLog));
+            clflush((char*)&log[(LogCur == 0)], sizeof(splitLog));
+            //Move LogCur to unused log slot.
+            LogCur = (LogCur == 0); // if LogCur = 0, (LogCur == 0) = 1
+            // if LogCur = 1, (LogCur == 0) = 0
+        }
+        n->branch[i].rect = RTreeNodeCover(n->branch[i].child);
+        clflush((char*)&n->branch[i], sizeof(struct Branch));
         if(!(rt == 1 && n == p)){
               pthread_mutex_unlock(n->mut);
         }
-      } 
 #endif
+      }
       return rt;
 	  }
     }
@@ -416,8 +486,6 @@ static int RTreeInsertRect2(struct Rect *r,
 	// Have reached level for insertion. Add rect, split if necessary
 	else
 	{
-        n->meta.VersionIncr();
-        clflush((char*)n, META); 
 #ifdef SHARED
       {
           n->mutex_->lock();
@@ -489,11 +557,23 @@ int RTreeInsertRect(struct Rect *R, int Did, struct Node **Root, struct splitLog
 		b.rect = RTreeNodeCover(newnode);
 		b.child = newnode;
 		RTreeAddBranch(&b, newroot, NULL, NULL, log);
+        
+        clflush((char *)newroot, META+cacheLineSize);
+         struct Node* temp = *root;
+         temp->meta.VersionIncr();
+         clflush((char*)temp,1);
+         if(log){
+            //TODO: Previous Log Invalidation ( NOT current log )
+            memset(&log[(LogCur == 0)], 0, sizeof(splitLog));
+            clflush((char*)&log[(LogCur == 0)], sizeof(splitLog));
+            //Move LogCur to unused log slot.
+            LogCur = (LogCur == 0); // if LogCur = 0, (LogCur == 0) = 1
+            // if LogCur = 1, (LogCur == 0) = 0
+         }
 #ifdef SHARED
    {
        newroot->mutex_->lock();
      {
-         struct Node* temp = *root;
          *root = newroot;
          temp->mutex_->unlock();
      }
@@ -503,7 +583,6 @@ int RTreeInsertRect(struct Rect *R, int Did, struct Node **Root, struct splitLog
    {   
       pthread_mutex_lock((newroot)->mut);
       {
-        struct Node* temp = *root; 
         *root = newroot;
         pthread_mutex_unlock(temp->mut);
       }
@@ -616,17 +695,9 @@ int RTreeAddBranch(struct Branch *B, struct Node *N, struct Node **New_node, str
 				n->branch[i] = *b;
 				n->meta.Set(i);
                 flipCount++;
-#ifdef MULTIMETA       
-                if(!(i/55))
-                    clflush((char *)n, 8);
-                else{
-                    //printf("%d %d: %p %p\n", i, i/55, n, n->meta.Bit2Addr(i));
-                    clflush((char *)n->meta.Bit2Addr(i), 8); 
-                }
- #else  
-                clflush((char*)n, META); 
- #endif    
                 clflush((char*)&n->branch[i], sizeof(struct Branch));
+                n->meta.VersionIncr();
+                clflush((char*)n,META);
 				break;
 			}
 		}
@@ -642,8 +713,11 @@ int RTreeAddBranch(struct Branch *B, struct Node *N, struct Node **New_node, str
             log->parent = p;                                                                                           
             log->child = n;
             log->sibling = nn;
+#ifdef MULTIMETA
+            memcpy(&log->meta, n->meta, sizeof(MetaData<META>));
+#endif
 //            printf("sizeof splitLog: %d\n", sizeof(struct splitLog));
-            clflush((char*)&log[0], sizeof(struct splitLog));
+            clflush((char*)&log[LogCur], sizeof(struct splitLog));
 #else
             log->parentPoint = p;                                                                                           
             log->childPoint = n;
@@ -651,10 +725,14 @@ int RTreeAddBranch(struct Branch *B, struct Node *N, struct Node **New_node, str
             log->parent = *p;                                                                                           
             log->child = *n;
             log->sibling = *nn;
+#ifdef MULTIMETA
+            memcpy(&log->meta, n->meta, sizeof(MetaData<META>));
+#endif
 //            printf("sizeof splitLog: %d\n", sizeof(struct splitLog));
-            clflush((char*)&log[0], sizeof(struct splitLog));
+            clflush((char*)&log[LogCur], sizeof(struct splitLog));
 #endif                        
         }
+    
         RTreeSplitNode(n, b, nn, p);
 		  
 		return 1;
@@ -1028,6 +1106,7 @@ static void RTreeLoadNodes(struct forSplit* fs, struct Node *N, struct Node *Q,
     else
         q->meta.Iter();
     n->meta.VersionReset();
+    q->meta.VersionIncr();
     int count = 0;
 	for (i=0; i<NODECARD+1; i++)
 	{
@@ -1049,9 +1128,9 @@ static void RTreeLoadNodes(struct forSplit* fs, struct Node *N, struct Node *Q,
             count++;
 		}
 	}
-    //printf("count: %d\n", count);
-    clflush((char*)q, 32 + sizeof(Branch) * count);
-    clflush((char*)n, META);
+    printf("count: %d\n", count);
+    clflush((char*)q, 32 + sizeof(Branch) * count); //(2)
+    clflush((char*)n, META); //(3)
 }
 
 /*-----------------------------------------------------------------------------
