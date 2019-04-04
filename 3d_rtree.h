@@ -232,8 +232,7 @@ int hostRTreeSearch(struct Node *n, struct Rect *r, int& reSplit)
     {
         for (i=0; i<NODECARD; i++){
             if(!n->meta.Bit(i)) continue;
-            //if(RTreeOverlap(r,&n->branch[i].rect)) // && n->isValid.test(i))
-            if(!Compare(r,&n->branch[i].rect)) // && n->isValid.test(i))
+            if(RTreeOverlap(r,&n->branch[i].rect)) // && n->isValid.test(i))
             {  
                 hitCount++;
             }
@@ -389,7 +388,7 @@ static int RTreeInsertRect2(struct Rect *r,
         //if(rt == 0){
         //    //Current Node is not split.( No deferred version++ )
         //    n->meta.VersionIncr();
-        //    clflush((char*)n, 1); 
+        //    lflush((char*)n, 1); 
         //}
         //TODO: child->VersionIncr();
         n_->meta.VersionIncr();
@@ -558,14 +557,14 @@ int RTreeInsertRect(struct Rect *R, int Did, struct Node **Root, struct splitLog
 		b.child = newnode;
 		RTreeAddBranch(&b, newroot, NULL, NULL, log);
         
-        clflush((char *)newroot, META+cacheLineSize);
+         clflush((char *)newroot, META+cacheLineSize);
          struct Node* temp = *root;
          temp->meta.VersionIncr();
          clflush((char*)temp,1);
          if(log){
             //TODO: Previous Log Invalidation ( NOT current log )
             memset(&log[(LogCur == 0)], 0, sizeof(splitLog));
-            clflush((char*)&log[(LogCur == 0)], sizeof(splitLog));
+            clflush((char*)&log[(LogCur == 0)], sizeof(splitLog)); //1
             //Move LogCur to unused log slot.
             LogCur = (LogCur == 0); // if LogCur = 0, (LogCur == 0) = 1
             // if LogCur = 1, (LogCur == 0) = 0
@@ -643,12 +642,14 @@ int RTreePickBranch(struct Rect *r, struct Node *n)
 	for (i=0; i<NODECARD; i++)
 	{
 		if(!n->meta.Bit(i)) continue;
-	    if(n->branch[i].child)	
 		{
 			rr = &n->branch[i].rect;
 			area = RTreeRectVolume(rr);
 			tmp_rect = RTreeCombineRect(r, rr);
 			increase = RTreeRectVolume(&tmp_rect) - area;
+			if(increase == 0){
+				return i;
+			}
 			if (increase < bestIncr || first_time)
 			{
 				best = i;
@@ -662,9 +663,6 @@ int RTreePickBranch(struct Rect *r, struct Node *n)
 				bestArea = area;
 				bestIncr = increase;
 			}
-		}
-		else{
-			break;
 		}
 	}
 	return best;
@@ -714,7 +712,7 @@ int RTreeAddBranch(struct Branch *B, struct Node *N, struct Node **New_node, str
             log->child = n;
             log->sibling = nn;
 #ifdef MULTIMETA
-            memcpy(&log->meta, n->meta, sizeof(MetaData<META>));
+            memcpy(&log->meta, &n->meta, sizeof(MetaData<META>));
 #endif
 //            printf("sizeof splitLog: %d\n", sizeof(struct splitLog));
             clflush((char*)&log[LogCur], sizeof(struct splitLog));
@@ -726,7 +724,7 @@ int RTreeAddBranch(struct Branch *B, struct Node *N, struct Node **New_node, str
             log->child = *n;
             log->sibling = *nn;
 #ifdef MULTIMETA
-            memcpy(&log->meta, n->meta, sizeof(MetaData<META>));
+            memcpy(&log->meta, &n->meta, sizeof(MetaData<META>));
 #endif
 //            printf("sizeof splitLog: %d\n", sizeof(struct splitLog));
             clflush((char*)&log[LogCur], sizeof(struct splitLog));
@@ -1128,7 +1126,7 @@ static void RTreeLoadNodes(struct forSplit* fs, struct Node *N, struct Node *Q,
             count++;
 		}
 	}
-    printf("count: %d\n", count);
+//    printf("count: %d\n", count);
     clflush((char*)q, 32 + sizeof(Branch) * count); //(2)
     clflush((char*)n, META); //(3)
 }

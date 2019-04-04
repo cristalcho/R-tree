@@ -17,6 +17,12 @@ class MetaData{
     }
   }
 //  ~MataData(void){}
+  void Init(void){
+    Version_ = 0;
+    for(int i = 0; i < N-1; i++){
+      Byte[i] = 0;
+    }
+  }
   //Get function
   uint8_t Version(void)const{
     return Version_;

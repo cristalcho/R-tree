@@ -30,29 +30,29 @@ struct Rect // Float(4byte) * 6
 struct Node;
 
 #ifndef MULTIMETA
-
 #define META 8
 #define DUMMY 24
-#define MAXCARD 55 
+#define MAXCARD 55
 #define NODECARD 55
 #else
-
-//#define META 16
-//#define DUMMY 16
-//#define MAXCARD 119
-//#define NODECARD 119 
-
+#ifdef NS2
+#define META 16
+#define DUMMY 16
+#define MAXCARD 119
+#define NODECARD 119
+#elif NS3
 #define META 24
 #define DUMMY 8
 #define MAXCARD 183
-#define NODECARD 183 
-
-//#define META 32
-//#define DUMMY 0
-//#define MAXCARD 247
-//#define NODECARD 247
+#define NODECARD 183
+#elif NS4
+#define META 32
+#define DUMMY 0
+#define MAXCARD 247
+#define NODECARD 247
 #endif
-
+#endif
+//
 struct Branch // 24 + 8
 {
 	struct Rect rect; // Float(4byte) * 6
@@ -79,6 +79,9 @@ struct splitLog{
     struct Node* parent; //+8
     struct Node* child; //+8
     struct Node* sibling; //+8
+#ifdef MULTIMETA
+    MetaData<META> meta;
+#endif
 };
 #else
 struct splitLog{
@@ -88,6 +91,9 @@ struct splitLog{
     struct Node* childPoint; //+8
     struct Node sibling; 
     struct Node* siblingPoint; //+8
+#ifdef MULTIMETA
+    MetaData<META> meta;
+#endif
 };
 #endif
 
