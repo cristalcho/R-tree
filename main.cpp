@@ -7,17 +7,6 @@ int NUMDATA=100;
 int SEARCH=10;
 int IpthreadNum=8;
 
-void cache_drop(){
-    //need to drop cache to initialize search from 0
-     // Remove cache
-     int size = 256*1024*1024;
-     char *garbage = new char[size];
-     for(int i=0;i<size;++i)
-         garbage[i] = i;
-     for(int i=100;i<size;++i)
-         garbage[i] += garbage[i-100];
-     delete[] garbage;
-}
 
 // thread data
 struct thread_data{
@@ -46,12 +35,7 @@ void* PThreadBOTH(void *arg)
     struct Rect r;
     struct thread_data_both* td = (struct thread_data_both*) arg;
     int reSplit = 1; 
-    printf("tid: %d\n", td->tid);
-    printf("hit: %d\n", td->hit);
-    printf("startDataNum: %d\n", td->startDataNum);
-    printf("dataINum: %d\n", td->dataINum);
-    printf("dataSNum: %d\n", td->dataSNum);
-    
+
     int iCur = 0;
     int sCur = 0;
     for(int i=0; i<td->dataINum + td->dataSNum; i++){
@@ -186,14 +170,13 @@ int main(int argc, char *args[])
     log_init(IpthreadNum);
 
 #ifdef CONC 
-    const int halfData = NUMDATA / 2;
+    const int warmData = NUMDATA - ((SEARCH * 3) / 7);
+    NUMDATA = (SEARCH * 3)/7;
     //warm up
-    for(int i=0; i< halfData; i++){
+    for(int i=0; i< warmData; i++){
         RTreeInsertRect(&r[i], i+1, &total_root, NULL);
-        ihit++;
     }
-    printf("Warm up (Half of NUMDATA) end %d/%d\n", halfData, ihit);
-    cache_drop();
+    printf("Warm up (warm of NUMDATA) end %d/%d\n", warmData, NUMDATA );
 #else
     const int insertPerThread = NUMDATA / IpthreadNum;
     const int searchPerThread = SEARCH / (SpthreadNum);
@@ -298,18 +281,19 @@ int main(int argc, char *args[])
     struct thread_data_both td[IpthreadNum];
     
     int in=0, se=0; 
-    NUMDATA = SEARCH * 1 / 2;
+
     const int insertPerThread = (NUMDATA) / insertThreads;
     const int searchPerThread = SEARCH / searchThreads;
      
     gettimeofday(&t1,0); // start the stopwatch
     for(int i=0; i<IpthreadNum; i++){
-            int dataS = halfData + in*insertPerThread;
-            int dataE = (in == insertThreads-1)? NUMDATA-dataS : insertPerThread;
-            in++;
-            int searchS = se*searchPerThread;
-            int searchE = (se== searchThreads-1)? SEARCH-searchS : searchPerThread; 
-            se++;
+        int dataS = warmData + in*insertPerThread;
+        int dataE = (in == insertThreads-1)? NUMDATA-in*insertPerThread : insertPerThread;
+        in++;
+        int searchS = se*searchPerThread;
+        int searchE = (se== searchThreads-1)? SEARCH-searchS : searchPerThread; 
+        se++;
+
 	    td[i].tid = i;
 	    td[i].hit = 0;
 	    td[i].Irect = &r[dataS]; 
@@ -317,13 +301,13 @@ int main(int argc, char *args[])
 	    td[i].startDataNum = dataS;
 	    td[i].dataINum = dataE;
 	    td[i].dataSNum = searchE;
-            rc = pthread_create(&threads[i], NULL, PThreadBOTH, (void *)&td[i]);
+      
+        rc = pthread_create(&threads[i], NULL, PThreadBOTH, (void *)&td[i]);
       if (rc) {
             printf("ERROR; return code from pthread_create() is %d\n", rc);
             exit(-1);
       }
     }
-//    printf("%d %d\n", in, se);
    
     for(int i=0; i<IpthreadNum; i++){
         rc = pthread_join(threads[i], &status);
@@ -336,9 +320,10 @@ int main(int argc, char *args[])
     
     gettimeofday(&t2,0);
     time_t2 = (t2.tv_sec-t1.tv_sec)*1000000 + (t2.tv_usec - t1.tv_usec);
+    printf("%d %d\n", in, se);
     printf("concurrent time (msec): %.3lf\n", time_t2/1000);
     printf("Host Hit counter = %ld, InsertCounter: %d\n", hit, ihit);
-    printf("throughput: %.3lf\n", (time_t2/1000)/(NUMDATA+SEARCH-halfData));
+    printf("throughput: %.3lf\n", (time_t2/1000)/(NUMDATA+SEARCH-warmData));
 
 #endif
  
