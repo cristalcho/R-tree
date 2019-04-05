@@ -30,7 +30,7 @@
 extern int NUMDATA;
 extern int SEARCH;
 extern int IpthreadNum;
-int flipCount = 0;
+uint64_t flipCount = 0;
 // using queue C++ style
 using namespace std;
 queue<struct Node*> nodeQueue;
@@ -301,6 +301,7 @@ static int RTreeInsertRect2(struct Rect *r,
         parent=n;
 		n->branch[i].rect = RTreeCombineRect(r, &n->branch[i].rect);
         clflush((char*)&n->branch[i], sizeof(struct Branch));
+        flipCount += sizeof(struct Branch);
         if(!n->branch[i].child->meta.IsFull()){
             unlocked = true;
             n->mutex_->unlock();
@@ -314,6 +315,7 @@ static int RTreeInsertRect2(struct Rect *r,
         parent = n;
 		n->branch[i].rect = RTreeCombineRect(r, &n->branch[i].rect);
         clflush((char*)&n->branch[i], sizeof(struct Branch));
+        flipCount += sizeof(struct Branch);
         if(!n->branch[i].child->meta.IsFull()){
     		unlocked = true;
             pthread_mutex_unlock(n->mut);
@@ -359,8 +361,12 @@ static int RTreeInsertRect2(struct Rect *r,
           RTreeAddBranch(&b, *new_node, NULL, p, NULL);
             if(OnTrace){
                 n->meta.Reset(i);
+		clflush((char*)n->meta.Bit2Addr(i),8); 
+		flipCount += 8;
             } else {
                 (*new_node)->meta.Reset(trace);
+		clflush((char*)(*new_node)->meta.Bit2Addr(trace),8);
+		flipCount+=8;
             }
         }
         else{
@@ -372,13 +378,19 @@ static int RTreeInsertRect2(struct Rect *r,
             //Split occurs
             if(OnTrace){
                 n->meta.Reset(i);
+		clflush((char*)n->meta.Bit2Addr(i),8);
+		flipCount+=8;
             } else {
                 (*new_node)->meta.Reset(trace);
+		clflush((char*)(*new_node)->meta.Bit2Addr(trace),8);
+		flipCount+=8;
             }
           }else {
                 //Split does not occur.
                 //Invalidate i th bitmap
                 n->meta.Reset(i);
+		clflush((char*)n->meta.Bit2Addr(i),8);
+		flipCount+=8;
             }
         }
         OnTrace = false;
@@ -392,17 +404,20 @@ static int RTreeInsertRect2(struct Rect *r,
         //}
         //TODO: child->VersionIncr();
         n_->meta.VersionIncr();
-        clflush((char*)n_, 1);
+        clflush((char*)n_, 1);      
+        flipCount += 1;
         if(log){
             //TODO: Previous Log Invalidation ( NOT current log )
             memset(&log[(LogCur == 0)], 0, sizeof(splitLog));
             clflush(&log[(LogCur == 0)], sizeof(splitLog));
+            flipCount += sizeof(splitLog);
             //Move LogCur to unused log slot.
             LogCur = (LogCur == 0); // if LogCur = 0, (LogCur == 0) = 1
             // if LogCur = 1, (LogCur == 0) = 0
         }
         n->branch[i].rect = RTreeNodeCover(n->branch[i].child);
         clflush((char*)&n->branch[i], sizeof(struct Branch));
+        flipCount += sizeof(Branch);
         if(!(rt == 1 && n == p)){
             n->mutex_->unlock();
         }
@@ -430,8 +445,12 @@ static int RTreeInsertRect2(struct Rect *r,
               RTreeAddBranch(&b, *new_node, NULL, p, NULL);
               if(OnTrace){
                   n->meta.Reset(i);
+		clflush((char*)n->meta.Bit2Addr(i),8);
+		flipCount+=8;
               }else{
                   (*new_node)->meta.Reset(trace);
+		clflush((char*)(*new_node)->meta.Bit2Addr(trace),8);
+		flipCount+=8;
               }
           } else {
               //Split does not occur
@@ -442,13 +461,19 @@ static int RTreeInsertRect2(struct Rect *r,
                   //Split Occur
                   if(OnTrace){
                     n->meta.Reset(i);
+		clflush((char*)n->meta.Bit2Addr(i),8);
+		flipCount+=8;
                   }else{
                     (*new_node)->meta.Reset(trace);
+		clflush((char*)(*new_node)->meta.Bit2Addr(trace),8);
+		flipCount+=8;
                   }
               }else{
                 //Split does not occur.
                 //Invalidate i th bitmap
                   n->meta.Reset(i);
+		clflush((char*)n->meta.Bit2Addr(i),8);
+		flipCount+=8;
               }
         }
         OnTrace = false;
@@ -463,16 +488,19 @@ static int RTreeInsertRect2(struct Rect *r,
         //TODO: child->VersionIncr();
         n_->meta.VersionIncr();
         clflush((char*)n_, 1);
+        flipCount += 1;
         if(log){
             //TODO: Previous Log Invalidation ( NOT current log )
             memset(&log[(LogCur == 0)], 0, sizeof(splitLog));
             clflush((char*)&log[(LogCur == 0)], sizeof(splitLog));
+            flipCount += sizeof(splitLog);
             //Move LogCur to unused log slot.
             LogCur = (LogCur == 0); // if LogCur = 0, (LogCur == 0) = 1
             // if LogCur = 1, (LogCur == 0) = 0
         }
         n->branch[i].rect = RTreeNodeCover(n->branch[i].child);
         clflush((char*)&n->branch[i], sizeof(struct Branch));
+        flipCount += sizeof(Branch);
         if(!(rt == 1 && n == p)){
               pthread_mutex_unlock(n->mut);
         }
@@ -539,10 +567,12 @@ int RTreeInsertRect(struct Rect *R, int Did, struct Node **Root, struct splitLog
 #ifndef FULLLOG      
                 log->parent = newroot;
                 clflush((char*)log, sizeof(struct splitLog));
+                flipCount += sizeof(Node *);
 #else
                 log->parentPoint = newroot;
                 log->parent = *newroot;
                 clflush((char*)&log->parent, sizeof(struct Node)+META);
+                flipCount += sizeof(struct Node)+META;
 #endif   
         }
                      
@@ -557,14 +587,17 @@ int RTreeInsertRect(struct Rect *R, int Did, struct Node **Root, struct splitLog
 		b.child = newnode;
 		RTreeAddBranch(&b, newroot, NULL, NULL, log);
         
-         clflush((char *)newroot, META+cacheLineSize);
+         clflush((char *)newroot, 32 + 2 * sizeof(Branch));
+         flipCount += 8 + 2*sizeof(Branch);
          struct Node* temp = *root;
          temp->meta.VersionIncr();
          clflush((char*)temp,1);
+         flipCount += 1;
          if(log){
             //TODO: Previous Log Invalidation ( NOT current log )
             memset(&log[(LogCur == 0)], 0, sizeof(splitLog));
             clflush((char*)&log[(LogCur == 0)], sizeof(splitLog)); //1
+            flipCount += sizeof(splitLog);
             //Move LogCur to unused log slot.
             LogCur = (LogCur == 0); // if LogCur = 0, (LogCur == 0) = 1
             // if LogCur = 1, (LogCur == 0) = 0
@@ -692,10 +725,12 @@ int RTreeAddBranch(struct Branch *B, struct Node *N, struct Node **New_node, str
 				//printf("!root\n");
 				n->branch[i] = *b;
 				n->meta.Set(i);
-                flipCount++;
+                flipCount+=1;
                 clflush((char*)&n->branch[i], sizeof(struct Branch));
+                flipCount += sizeof(Branch);
                 n->meta.VersionIncr();
                 clflush((char*)n,META);
+                flipCount += META;
 				break;
 			}
 		}
@@ -716,6 +751,7 @@ int RTreeAddBranch(struct Branch *B, struct Node *N, struct Node **New_node, str
 #endif
 //            printf("sizeof splitLog: %d\n", sizeof(struct splitLog));
             clflush((char*)&log[LogCur], sizeof(struct splitLog));
+            flipCount += sizeof(splitLog);
 #else
             log->parentPoint = p;                                                                                           
             log->childPoint = n;
@@ -728,6 +764,7 @@ int RTreeAddBranch(struct Branch *B, struct Node *N, struct Node **New_node, str
 #endif
 //            printf("sizeof splitLog: %d\n", sizeof(struct splitLog));
             clflush((char*)&log[LogCur], sizeof(struct splitLog));
+            flipCount += sizeof(splitLog);
 #endif                        
         }
     
@@ -1128,7 +1165,9 @@ static void RTreeLoadNodes(struct forSplit* fs, struct Node *N, struct Node *Q,
 	}
 //    printf("count: %d\n", count);
     clflush((char*)q, 32 + sizeof(Branch) * count); //(2)
+    flipCount += 32 + sizeof(Branch) * count;
     clflush((char*)n, META); //(3)
+    flipCount += META;
 }
 
 /*-----------------------------------------------------------------------------

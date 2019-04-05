@@ -1,6 +1,6 @@
 #include "3d_rtree.h"
 
-extern int flipCount;
+extern uint64_t flipCount;
 char queryFileName[] = "taxi_mbr_list_15sec.txt";
 char dataFileName[] = "taxi_mbr_list_15sec.txt";
 int NUMDATA=100;
@@ -148,12 +148,12 @@ int main(int argc, char *args[])
     for(int i=0; i<SEARCH; i++){
         fscanf(fp, "%f %f %f %f %f %f", &sr[i].boundary[0], &sr[i].boundary[1], &sr[i].boundary[2], &sr[i].boundary[3], &sr[i].boundary[4], &sr[i].boundary[5]);
     
-    	sr[i].boundary[0] += delta;
-    	sr[i].boundary[1] += delta;
-    	sr[i].boundary[2] += delta;
-    	sr[i].boundary[3] -= delta;
-    	sr[i].boundary[4] -= delta;
-    	sr[i].boundary[5] -= delta;
+    	sr[i].boundary[0] -= delta;
+    	sr[i].boundary[1] -= delta;
+    	sr[i].boundary[2] -= delta;
+    	sr[i].boundary[3] += delta;
+    	sr[i].boundary[4] += delta;
+    	sr[i].boundary[5] += delta;
     }
     if(fclose(fp) != 0) 
         printf("Insert file close error\n");
