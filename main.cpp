@@ -1,8 +1,13 @@
 #include "3d_rtree.h"
+#ifdef BREAKDOWN
+extern double traversal_time;
+extern double write_time;
+#endif
 
 extern uint64_t flipCount;
-char queryFileName[] = "taxi_mbr_list_15sec.txt";
-char dataFileName[] = "taxi_mbr_list_15sec.txt";
+extern uint64_t splitCount;
+char queryFileName[] = "/home/cristalcho/rtree/bitR-tree/taxi_mbr_list_15sec.txt";
+char dataFileName[] = "/home/cristalcho/rtree/bitR-tree/taxi_mbr_list_15sec.txt";
 int NUMDATA=100;
 int SEARCH=10;
 int IpthreadNum=8;
@@ -219,9 +224,20 @@ int main(int argc, char *args[])
     }
 	gettimeofday(&it2,0);
     time_it1 = (it2.tv_sec-it1.tv_sec)*1000000 + (it2.tv_usec - it1.tv_usec);
+#ifdef BREAKDOWN
+    printf("traversal time (msec): %.3lf\n", traversal_time/1000);
+    printf("write time (msec): %.3lf\n", write_time/1000);
+    //printf("diff time (msec): %.3lf\n", (time_it1 - traversal_time - write_time)/1000);
+#else
     printf("insert time (msec): %.3lf\n", time_it1/1000);
-    printf("clflush: %d, flipCount: %d\n", clflushCnt, flipCount); 	
+#endif
+    printf("clflush: %ld, flipCount: %ld\n", clflushCnt, flipCount); 	
+    printf("splitCount: %ld\n", splitCount); 	
     fprintf(stderr, "Insertion is done.\n");
+
+    checkFreeSpace(total_root);
+    return 0;
+            
  
 	//########################################################
 //-------------------------------------------------------------------------
