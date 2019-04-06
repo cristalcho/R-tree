@@ -405,10 +405,12 @@ static int RTreeInsertRect2(struct Rect *r,
         rt = RTreeAddBranch(&b, n, new_node, p, log);
         //Add updated CoW node
 	Node* CoW_Node = RTreeNewNode();
+	n_ = CoW_Node;
 	memcpy(CoW_Node,n->branch[i].child,sizeof(Node));
 	clflush((char*)CoW_Node, sizeof(Node));
 	flipCount += sizeof(Node);
-        b.rect = RTreeCombineRect(r, &n->branch[i].rect);
+        //b.rect = RTreeCombineRect(r, &n->branch[i].rect);
+        b.rect = RTreeNodeCover(n->branch[i].child);
         b.child = CoW_Node;
         if(rt == 1){
             //Split occurs.
@@ -464,9 +466,11 @@ static int RTreeInsertRect2(struct Rect *r,
             LogCur = (LogCur == 0); // if LogCur = 0, (LogCur == 0) = 1
             // if LogCur = 1, (LogCur == 0) = 0
         }
+#ifdef INPLACE
         n->branch[i].rect = RTreeNodeCover(n->branch[i].child);
         clflush((char*)&n->branch[i], sizeof(struct Branch));
         flipCount += sizeof(Branch);
+#endif
         if(!(rt == 1 && n == p)){
             n->mutex_->unlock();
         }
@@ -488,10 +492,12 @@ static int RTreeInsertRect2(struct Rect *r,
           rt = RTreeAddBranch(&b, n, new_node, p, log);
         //Add updated CoW node
 	Node* CoW_Node = RTreeNewNode();
+	n_ = CoW_Node;
 	memcpy(CoW_Node,n->branch[i].child,sizeof(Node));
 	clflush((char*)CoW_Node, sizeof(Node));
 	flipCount += sizeof(Node);
-        b.rect = RTreeCombineRect(r, &n->branch[i].rect);
+        //b.rect = RTreeCombineRect(r, &n->branch[i].rect);
+        b.rect = RTreeNodeCover(n->branch[i].child);
         b.child = CoW_Node;
           if(rt == 1){
               //Split occurs
@@ -548,9 +554,11 @@ static int RTreeInsertRect2(struct Rect *r,
             LogCur = (LogCur == 0); // if LogCur = 0, (LogCur == 0) = 1
             // if LogCur = 1, (LogCur == 0) = 0
         }
+#ifdef INPLACE
         n->branch[i].rect = RTreeNodeCover(n->branch[i].child);
         clflush((char*)&n->branch[i], sizeof(struct Branch));
         flipCount += sizeof(Branch);
+#endif
         if(!(rt == 1 && n == p)){
               pthread_mutex_unlock(n->mut);
         }
