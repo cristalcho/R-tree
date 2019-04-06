@@ -31,6 +31,15 @@ extern int NUMDATA;
 extern int SEARCH;
 extern int IpthreadNum;
 uint64_t flipCount = 0;
+uint64_t splitCount = 0;
+
+#ifdef BREAKDOWN
+double traversal_time = 0.0;
+double write_time = 0.0;
+struct timeval tr1,tr2;
+struct timeval wr1,wr2;
+#endif
+
 // using queue C++ style
 using namespace std;
 queue<struct Node*> nodeQueue;
@@ -52,6 +61,43 @@ int RTreeContained(struct Rect *r, struct Rect *s);
 struct Node* RTreeSplitNode(struct Node *n, struct Branch *b, int tid);
 void RTreeSplitNode(struct Node *n, struct Branch *b, struct Node *nn, struct Node *p);
 
+double checkFreeSpace(struct Node* n){
+    uint64_t freeSpace=0;
+    uint64_t nfreeSpace=0;
+    int nodeCount=0;
+    int nodeSeq = 0;
+	nodeQueue.push(n);
+	nodeSeq++;
+
+	while(!nodeQueue.empty()){
+		struct Node* t = nodeQueue.front();
+		nodeQueue.pop();
+        nodeCount++;
+        if(!t->meta.IsLeaf()){ // This is an internal node in the tree
+			for(int i=0; i<NODECARD; i++){	
+				struct Branch b = t->branch[i];
+				if(t->meta.Bit(i)){ 
+					nodeQueue.push(b.child);
+					nodeSeq++;
+                    nfreeSpace++;
+				}
+                else
+                    freeSpace++;
+			}
+		}else{	
+		  for(int i=0; i<NODECARD; i++){
+              if(!t->meta.Bit(i))
+                  freeSpace++;
+              else 
+                  nfreeSpace++;
+		  }
+        }
+    }
+
+    printf("freespace: %ld, nfreeSpace: %ld, nodeCount: %d\n", freeSpace, nfreeSpace, nodeCount);
+    return freeSpace*sizeof(Branch) / nodeCount*NODECARD*sizeof(Branch);
+
+}
 void RTreePrint(struct Node* n) 
 {
 	int nodeSeq = 0;
@@ -63,13 +109,13 @@ void RTreePrint(struct Node* n)
 		nodeQueue.pop();
         if(!t->meta.IsLeaf()){ // This is an internal node in the tree
           t->meta.Print();
-		//  printf("------Not leaf : [%p]-------\n", t);
+		  printf("------Not leaf : [%p]-------\n", t);
 	//        printf("[%d][%s] %s\n", t->version, t->isLeaf.to_string().c_str(), t->isValid.to_string().c_str());
 			for(int i=0; i<NODECARD; i++){
 				struct Branch b = t->branch[i];
 				
-		//		printf("%lf %lf %lf %lf %f %f\n", b.rect.boundary[0], b.rect.boundary[1], 
-		//					    b.rect.boundary[2], b.rect.boundary[3], b.rect.boundary[4], b.rect.boundary[5]); 
+				printf("%lf %lf %lf %lf %f %f\n", b.rect.boundary[0], b.rect.boundary[1], 
+							    b.rect.boundary[2], b.rect.boundary[3], b.rect.boundary[4], b.rect.boundary[5]); 
 
 				if(t->meta.Bit(i)){ 
 					nodeQueue.push(b.child);
@@ -80,13 +126,13 @@ void RTreePrint(struct Node* n)
 			printf("\n");
 		}else{	
         //printf("------ Leaf : [%p]-------\n", t);
-   //       t->meta.Print();
+          t->meta.Print();
 		  for(int i=0; i<NODECARD; i++){
-  //            if(t->meta.Bit(i))
- //       			printf("%lf %lf %lf %lf %f %f\n", t->branch[i].rect.boundary[0], t->branch[i].rect.boundary[1],
-//						    t->branch[i].rect.boundary[2], t->branch[i].rect.boundary[3], t->branch[i].rect.boundary[4], t->branch[i].rect.boundary[5]); 
+              if(t->meta.Bit(i))
+        			printf("%lf %lf %lf %lf %f %f\n", t->branch[i].rect.boundary[0], t->branch[i].rect.boundary[1],
+						    t->branch[i].rect.boundary[2], t->branch[i].rect.boundary[3], t->branch[i].rect.boundary[4], t->branch[i].rect.boundary[5]); 
 		  }
-    //      printf("\n");
+          printf("\n");
         }
   }
 }
@@ -338,6 +384,9 @@ static int RTreeInsertRect2(struct Rect *r,
 		}
 		else    // child was split
 		{
+#ifdef BREAKDOWN
+	gettimeofday(&wr1,0);
+#endif
 #ifdef SHARED
        {
          if(unlocked){
@@ -349,59 +398,59 @@ static int RTreeInsertRect2(struct Rect *r,
 #ifdef INPLACE
         rt = RTreeAddBranch(&b, n, new_node, p, log); //(4)
 #else
+
         //Add New node
         OnTrace = true;
         trace = i;
         rt = RTreeAddBranch(&b, n, new_node, p, log);
-        //Add updated old node
+        //Add updated CoW node
+	Node* CoW_Node = RTreeNewNode();
+	memcpy(CoW_Node,n->branch[i].child,sizeof(Node));
+	clflush((char*)CoW_Node, sizeof(Node));
+	flipCount += sizeof(Node);
         b.rect = RTreeCombineRect(r, &n->branch[i].rect);
-        b.child = n->branch[i].child;
+        b.child = CoW_Node;
         if(rt == 1){
-          //Split occurs.
-          RTreeAddBranch(&b, *new_node, NULL, p, NULL);
+            //Split occurs.
+            RTreeAddBranch(&b, *new_node, NULL, p, NULL);
             if(OnTrace){
                 n->meta.Reset(i);
-		clflush((char*)n->meta.Bit2Addr(i),8); 
-		flipCount += 8;
+                clflush((char*)n->meta.Bit2Addr(i),8); 
+                flipCount += 8;
             } else {
                 (*new_node)->meta.Reset(trace);
-		clflush((char*)(*new_node)->meta.Bit2Addr(trace),8);
-		flipCount+=8;
+                clflush((char*)(*new_node)->meta.Bit2Addr(trace),8);
+                flipCount+=8;
             }
         }
         else{
             //Split does not occur
-          OnTrace = true;
-          trace = i;
-          rt = RTreeAddBranch(&b, n, new_node, p, log);
-          if(rt == 1){
-            //Split occurs
-            if(OnTrace){
-                n->meta.Reset(i);
-		clflush((char*)n->meta.Bit2Addr(i),8);
-		flipCount+=8;
-            } else {
-                (*new_node)->meta.Reset(trace);
-		clflush((char*)(*new_node)->meta.Bit2Addr(trace),8);
-		flipCount+=8;
-            }
-          }else {
+            OnTrace = true;
+            trace = i;
+            rt = RTreeAddBranch(&b, n, new_node, p, log);
+            if(rt == 1){
+                //Split occurs
+                if(OnTrace){
+                    n->meta.Reset(i);
+                    clflush((char*)n->meta.Bit2Addr(i),8);
+                    flipCount+=8;
+                } else {
+                    (*new_node)->meta.Reset(trace);
+                    clflush((char*)(*new_node)->meta.Bit2Addr(trace),8);
+                    flipCount+=8;
+                }
+            }else {
                 //Split does not occur.
                 //Invalidate i th bitmap
                 n->meta.Reset(i);
-		clflush((char*)n->meta.Bit2Addr(i),8);
-		flipCount+=8;
+                clflush((char*)n->meta.Bit2Addr(i),8);
+                flipCount+=8;
             }
         }
         OnTrace = false;
         trace = -1;
 
 #endif
-        //if(rt == 0){
-        //    //Current Node is not split.( No deferred version++ )
-        //    n->meta.VersionIncr();
-        //    lflush((char*)n, 1); 
-        //}
         //TODO: child->VersionIncr();
         n_->meta.VersionIncr();
         clflush((char*)n_, 1);      
@@ -437,22 +486,28 @@ static int RTreeInsertRect2(struct Rect *r,
           OnTrace = true;
           trace = i;
           rt = RTreeAddBranch(&b, n, new_node, p, log);
-          //Add update old node
-		  b.rect = RTreeCombineRect(r, &n->branch[i].rect);
-          b.child = n->branch[i].child;
+        //Add updated CoW node
+	Node* CoW_Node = RTreeNewNode();
+	memcpy(CoW_Node,n->branch[i].child,sizeof(Node));
+	clflush((char*)CoW_Node, sizeof(Node));
+	flipCount += sizeof(Node);
+        b.rect = RTreeCombineRect(r, &n->branch[i].rect);
+        b.child = CoW_Node;
           if(rt == 1){
               //Split occurs
+              printf("here is strange\n");
               RTreeAddBranch(&b, *new_node, NULL, p, NULL);
               if(OnTrace){
                   n->meta.Reset(i);
-		clflush((char*)n->meta.Bit2Addr(i),8);
-		flipCount+=8;
+                  clflush((char*)n->meta.Bit2Addr(i),8);
+                  flipCount+=8;
               }else{
                   (*new_node)->meta.Reset(trace);
-		clflush((char*)(*new_node)->meta.Bit2Addr(trace),8);
-		flipCount+=8;
+                  clflush((char*)(*new_node)->meta.Bit2Addr(trace),8);
+                  flipCount+=8;
               }
-          } else {
+          } 
+          else {
               //Split does not occur
               OnTrace = true;
               trace = i;
@@ -460,31 +515,26 @@ static int RTreeInsertRect2(struct Rect *r,
               if(rt == 1){
                   //Split Occur
                   if(OnTrace){
-                    n->meta.Reset(i);
-		clflush((char*)n->meta.Bit2Addr(i),8);
-		flipCount+=8;
+                      n->meta.Reset(i);
+                      clflush((char*)n->meta.Bit2Addr(i),8);
+                      flipCount+=8;
                   }else{
-                    (*new_node)->meta.Reset(trace);
-		clflush((char*)(*new_node)->meta.Bit2Addr(trace),8);
-		flipCount+=8;
+                      (*new_node)->meta.Reset(trace);
+                      clflush((char*)(*new_node)->meta.Bit2Addr(trace),8);
+                      flipCount+=8;
                   }
               }else{
-                //Split does not occur.
-                //Invalidate i th bitmap
+                  //Split does not occur.
+                  //Invalidate i th bitmap
                   n->meta.Reset(i);
-		clflush((char*)n->meta.Bit2Addr(i),8);
-		flipCount+=8;
+                  clflush((char*)n->meta.Bit2Addr(i),8);
+                  flipCount+=8;
               }
-        }
+          }
         OnTrace = false;
         trace = -1;
             //flipCount++;
 #endif
-        //if(rt == 0){
-        //    //Current Node is not split.( No deferred version++ )
-        //    n->meta.VersionIncr();
-        //    clflush((char*)n, 1); 
-        //}
         //TODO: child->VersionIncr();
         n_->meta.VersionIncr();
         clflush((char*)n_, 1);
@@ -506,6 +556,10 @@ static int RTreeInsertRect2(struct Rect *r,
         }
 #endif
       }
+#ifdef BREAKDOWN
+	gettimeofday(&wr2,0);
+	write_time += (wr2.tv_sec-wr1.tv_sec)*1000000 + (wr2.tv_usec - wr1.tv_usec);
+#endif
       return rt;
 	  }
     }
@@ -513,6 +567,11 @@ static int RTreeInsertRect2(struct Rect *r,
 	// Have reached level for insertion. Add rect, split if necessary
 	else
 	{
+#ifdef BREAKDOWN
+    gettimeofday(&tr2,0); // start the stopwatch
+    traversal_time += (tr2.tv_sec-tr1.tv_sec)*1000000 + (tr2.tv_usec - tr1.tv_usec);
+    gettimeofday(&wr1,0); // start the stopwatch
+#endif
 #ifdef SHARED
       {
           n->mutex_->lock();
@@ -536,6 +595,10 @@ static int RTreeInsertRect2(struct Rect *r,
         }
       }
 #endif      
+#ifdef BREAKDOWN
+    gettimeofday(&wr2,0); // start the stopwatch
+    write_time += (wr2.tv_sec-wr1.tv_sec)*1000000 + (wr2.tv_usec - wr1.tv_usec);
+#endif
         return rt;
 	}
 }
@@ -557,9 +620,16 @@ int RTreeInsertRect(struct Rect *R, int Did, struct Node **Root, struct splitLog
 	struct Node *newnode;
 	struct Branch b;
 	int result;
+	
+#ifdef BREAKDOWN
+	gettimeofday(&tr1,0); // start the stopwatch
+#endif
 
     if (RTreeInsertRect2(r, dataID, *root, &newnode, *root, log))  /* root split */
 	{
+#ifdef BREAKDOWN
+	gettimeofday(&wr1,0);
+#endif
 		//make new root
 		newroot = RTreeNewNode();  /* grow a new root, & tree taller */
         //log update
@@ -622,6 +692,10 @@ int RTreeInsertRect(struct Rect *R, int Did, struct Node **Root, struct splitLog
    }
 #endif        
 		result = 1;
+#ifdef BREAKDOWN
+	gettimeofday(&wr2,0);
+	write_time += (wr2.tv_sec-wr1.tv_sec)*1000000 + (wr2.tv_usec - wr1.tv_usec);
+#endif
 	}
 	else{
 		result = 0;
@@ -738,6 +812,7 @@ int RTreeAddBranch(struct Branch *B, struct Node *N, struct Node **New_node, str
 	}
 	else
 	{
+        splitCount ++;
         *new_node = RTreeNewNode();   
         register struct Node *nn = *new_node; 
        
