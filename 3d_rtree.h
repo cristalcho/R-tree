@@ -419,21 +419,22 @@ static int RTreeInsertRect2(struct Rect *r,
         rt = RTreeAddBranch(&b, n, new_node, p, log); //(4)
 #else
 
-        //Add New node
         OnTrace = true;
         trace = i;
-        rt = RTreeAddBranch(&b, n, new_node, p, log);
         //Add updated CoW node
+	Branch b2;
 	Node* CoW_Node = RTreeNewNode();
 	n_ = CoW_Node;
 	memcpy(CoW_Node,n->branch[i].child,sizeof(Node));
 	clflush((char*)CoW_Node, sizeof(Node));
 	flipCount += sizeof(Node);
         //b.rect = RTreeCombineRect(r, &n->branch[i].rect);
-        b.rect = RTreeNodeCover(n->branch[i].child);
-        b.child = CoW_Node;
+        b2.rect = RTreeNodeCover(n->branch[i].child);
+        b2.child = CoW_Node;
+        rt = RTreeAddBranch(&b2, n, new_node, p, log);
         if(rt == 1){
             //Split occurs.
+        //Add New node
             RTreeAddBranch(&b, *new_node, NULL, p, NULL);
             if(OnTrace){
                 n->meta.Reset(i);
@@ -449,6 +450,7 @@ static int RTreeInsertRect2(struct Rect *r,
             //Split does not occur
             OnTrace = true;
             trace = i;
+        //Add New node
             rt = RTreeAddBranch(&b, n, new_node, p, log);
             if(rt == 1){
                 //Split occurs
@@ -509,16 +511,17 @@ static int RTreeInsertRect2(struct Rect *r,
           //Add new node
           OnTrace = true;
           trace = i;
-          rt = RTreeAddBranch(&b, n, new_node, p, log);
         //Add updated CoW node
+	Branch b2;
 	Node* CoW_Node = RTreeNewNode();
 	n_ = CoW_Node;
 	memcpy(CoW_Node,n->branch[i].child,sizeof(Node));
 	clflush((char*)CoW_Node, sizeof(Node));
 	flipCount += sizeof(Node);
         //b.rect = RTreeCombineRect(r, &n->branch[i].rect);
-        b.rect = RTreeNodeCover(n->branch[i].child);
-        b.child = CoW_Node;
+        b2.rect = RTreeNodeCover(n->branch[i].child);
+        b2.child = CoW_Node;
+        rt = RTreeAddBranch(&b2, n, new_node, p, log);
           if(rt == 1){
               //Split occurs
               printf("here is strange\n");
