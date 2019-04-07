@@ -345,9 +345,19 @@ static int RTreeInsertRect2(struct Rect *r,
         i = RTreePickBranch(r, n);
 
         parent=n;
+#ifdef BREAKDOWN
+    gettimeofday(&tr2,0); // start the stopwatch
+    traversal_time += (tr2.tv_sec-tr1.tv_sec)*1000000 + (tr2.tv_usec - tr1.tv_usec);
+	gettimeofday(&wr1,0);
+#endif
 		n->branch[i].rect = RTreeCombineRect(r, &n->branch[i].rect);
         clflush((char*)&n->branch[i], sizeof(struct Branch));
         flipCount += sizeof(struct Branch);
+#ifdef BREAKDOWN
+	gettimeofday(&wr2,0);
+	write_time += (wr2.tv_sec-wr1.tv_sec)*1000000 + (wr2.tv_usec - wr1.tv_usec);
+	gettimeofday(&tr1,0); // start the stopwatch
+#endif
         if(!n->branch[i].child->meta.IsFull()){
             unlocked = true;
             n->mutex_->unlock();
@@ -359,9 +369,19 @@ static int RTreeInsertRect2(struct Rect *r,
 		i = RTreePickBranch(r, n); // i is the index of split branc
 
         parent = n;
+#ifdef BREAKDOWN
+    gettimeofday(&tr2,0); // start the stopwatch
+    traversal_time += (tr2.tv_sec-tr1.tv_sec)*1000000 + (tr2.tv_usec - tr1.tv_usec);
+	gettimeofday(&wr1,0);
+#endif
 		n->branch[i].rect = RTreeCombineRect(r, &n->branch[i].rect);
         clflush((char*)&n->branch[i], sizeof(struct Branch));
         flipCount += sizeof(struct Branch);
+#ifdef BREAKDOWN
+	gettimeofday(&wr2,0);
+	write_time += (wr2.tv_sec-wr1.tv_sec)*1000000 + (wr2.tv_usec - wr1.tv_usec);
+	gettimeofday(&tr1,0); // start the stopwatch
+#endif
         if(!n->branch[i].child->meta.IsFull()){
     		unlocked = true;
             pthread_mutex_unlock(n->mut);
